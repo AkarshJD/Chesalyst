@@ -17,7 +17,7 @@ It combines bitboard-based move generation, alpha-beta pruning, and heuristic ev
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -40,7 +40,7 @@ Then follow the on-screen instructions to choose time controls and side.
 
 ---
 
-## 🎮 Modes
+## Modes
 
 - **Player vs Engine** – Choose White or Black and play
 - **Engine vs Engine** – Watch the machine analyze itself
@@ -48,7 +48,7 @@ Then follow the on-screen instructions to choose time controls and side.
 
 ---
 
-## 🧪 Code Structure
+## Code Structure
 
 ```
 .
