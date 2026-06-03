@@ -14,6 +14,7 @@ def _board_snapshot(board):
         'halfmove_clock': board.halfmove_clock,
         'fullmove_number': board.fullmove_number,
         'stack_depth': len(board._state_stack),
+        'hash_history_len': len(board._hash_history),
     }
 
 

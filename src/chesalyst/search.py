@@ -188,6 +188,12 @@ class Searcher:
         if self._out_of_time():
             raise TimeoutError
 
+        # Draw by 50-move rule or repetition (second occurrence = draw available)
+        if board.halfmove_clock >= 100:
+            return 0
+        if board.zobrist_hash in board._hash_history:
+            return 0
+
         if depth == 0:
             return self._quiescence(board, alpha, beta, maximizing)
 

@@ -301,6 +301,53 @@ def test_en_passant():
 
 
 # ------------------------------------------------------------------ #
+#  Hash history / repetition tracking                                 #
+# ------------------------------------------------------------------ #
+
+def test_hash_history_grows_and_shrinks():
+    board = Board()
+    assert len(board._hash_history) == 0
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert len(board._hash_history) == 1
+    board.undo_move(move)
+    assert len(board._hash_history) == 0
+
+
+def test_hash_history_records_pre_move_hash():
+    board = Board()
+    start_hash = board.zobrist_hash
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert board._hash_history[0] == start_hash, \
+        "History must record the hash before the move, not after"
+
+
+def test_repetition_detected_in_history():
+    # Make a move and undo it manually so the starting hash appears in history.
+    board = Board()
+    start_hash = board.zobrist_hash
+    moves = board.generate_legal_moves()
+    # Play two moves then reach the same position again via a different path.
+    m1 = next(m for m in moves if m.from_square == sq('g1'))  # Ng1-f3
+    board.make_move(m1)
+    m2 = next(m for m in board.generate_legal_moves()
+              if m.from_square == sq('g8'))  # Ng8-f6
+    board.make_move(m2)
+    # Now move the knight back: Nf3-g1
+    m3 = next(m for m in board.generate_legal_moves()
+              if m.to_square == sq('g1'))
+    board.make_move(m3)
+    m4 = next(m for m in board.generate_legal_moves()
+              if m.to_square == sq('g8'))
+    board.make_move(m4)
+    # Board is back to starting position — hash should be in history
+    assert board.zobrist_hash == start_hash
+    assert board.zobrist_hash in board._hash_history, \
+        "Starting position must be in history after 4-move round-trip"
+
+
+# ------------------------------------------------------------------ #
 #  Zobrist hashing                                                     #
 # ------------------------------------------------------------------ #
 

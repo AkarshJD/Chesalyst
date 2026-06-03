@@ -77,6 +77,7 @@ class Board:
         self.fullmove_number = 1
         self._state_stack = []
         self._null_stack = []
+        self._hash_history = []  # hashes of all positions visited (make_move appends, undo_move pops)
         self.white_occ = np.uint64(0)
         self.black_occ = np.uint64(0)
         self.all_occ = np.uint64(0)
@@ -320,6 +321,7 @@ class Board:
         cr = self.castling_rights
         bb = self.bitboards
         h = self.zobrist_hash
+        self._hash_history.append(h)  # record position before this move
 
         self._state_stack.append((
             (bb['P'], bb['N'], bb['B'], bb['R'], bb['Q'], bb['K'],
@@ -448,9 +450,11 @@ class Board:
         self.halfmove_clock = hmc
         self.fullmove_number = fmn
         self.zobrist_hash = zh
+        self._hash_history.pop()
 
     def make_null_move(self):
         """Pass the turn without moving a piece (for null move pruning)."""
+        self._hash_history.append(self.zobrist_hash)
         h = self.zobrist_hash
         if self.en_passant_square is not None:
             h ^= _Z_EP[self.en_passant_square & 7]
@@ -467,6 +471,7 @@ class Board:
         self.halfmove_clock = hmc
         self.zobrist_hash = zh
         self.white_to_move = not self.white_to_move
+        self._hash_history.pop()
 
     # ------------------------------------------------------------------ #
     #  Check / attack detection                                            #
