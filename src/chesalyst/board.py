@@ -116,6 +116,19 @@ class Board:
             self.undo_move(move)
         return legal_moves
 
+    def generate_legal_captures(self):
+        """Return only legal captures, en passants, and promotions (for quiescence search)."""
+        legal = []
+        moving_side = self.white_to_move
+        for move in self.generate_moves():
+            if not (move.capture or move.en_passant or move.promotion):
+                break  # captures are sorted first; first quiet move means we're done
+            self.make_move(move)
+            if not self.is_in_check_for(moving_side):
+                legal.append(move)
+            self.undo_move(move)
+        return legal
+
     def generate_moves(self):
         white = self.white_to_move
         all_moves = (

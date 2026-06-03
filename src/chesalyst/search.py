@@ -117,18 +117,15 @@ class Searcher:
         if self._out_of_time():
             raise TimeoutError
 
+        if depth == 0:
+            return self._quiescence(board, alpha, beta, maximizing)
+
         moves = board.generate_legal_moves()
 
         if not moves:
-            # Checkmate or stalemate
             if board.is_check():
-                # Side to move is mated — use a depth-adjusted score so
-                # faster mates are ranked higher
                 return (-50000 + depth) if board.white_to_move else (50000 - depth)
             return 0
-
-        if depth == 0:
-            return self.evaluator.evaluate(board)
 
         if maximizing:
             best = -math.inf
@@ -137,7 +134,6 @@ class Searcher:
                 try:
                     score = self._minimax(board, depth - 1, alpha, beta, False)
                 finally:
-                    # Always undo — TimeoutError propagates naturally after this
                     board.undo_move(move)
                 best = max(best, score)
                 alpha = max(alpha, score)
@@ -150,6 +146,60 @@ class Searcher:
                 board.make_move(move)
                 try:
                     score = self._minimax(board, depth - 1, alpha, beta, True)
+                finally:
+                    board.undo_move(move)
+                best = min(best, score)
+                beta = min(beta, score)
+                if beta <= alpha:
+                    break
+            return best
+
+    def _quiescence(self, board, alpha, beta, maximizing):
+        self.nodes += 1
+        if self._out_of_time():
+            raise TimeoutError
+
+        in_check = board.is_check()
+        stand_pat = self.evaluator.evaluate(board)
+
+        if not in_check:
+            if maximizing:
+                if stand_pat >= beta:
+                    return stand_pat
+                if stand_pat > alpha:
+                    alpha = stand_pat
+            else:
+                if stand_pat <= alpha:
+                    return stand_pat
+                if stand_pat < beta:
+                    beta = stand_pat
+
+        moves = board.generate_legal_moves() if in_check else board.generate_legal_captures()
+
+        if not moves:
+            if in_check:
+                return -50000 if maximizing else 50000
+            return stand_pat
+
+        if maximizing:
+            best = -math.inf if in_check else stand_pat
+            for move in moves:
+                board.make_move(move)
+                try:
+                    score = self._quiescence(board, alpha, beta, False)
+                finally:
+                    board.undo_move(move)
+                best = max(best, score)
+                alpha = max(alpha, score)
+                if beta <= alpha:
+                    break
+            return best
+        else:
+            best = math.inf if in_check else stand_pat
+            for move in moves:
+                board.make_move(move)
+                try:
+                    score = self._quiescence(board, alpha, beta, True)
                 finally:
                     board.undo_move(move)
                 best = min(best, score)
