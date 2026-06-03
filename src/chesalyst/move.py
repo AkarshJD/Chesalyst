@@ -4,7 +4,7 @@ class Move:
         self.to_square = to_square
         self.promotion = promotion
         self.capture = capture
-        self.castle = castle  # 'kingside', 'queenside', or None
+        self.castle = castle
         self.en_passant = en_passant
 
     def is_kingside_castle(self):
@@ -14,17 +14,23 @@ class Move:
         return self.castle == 'queenside'
 
     def is_pawn_move(self):
-        """
-        Detect a pawn move by distance:
-        ‑ quiet: 8 or 16 squares (straight ahead)
-        ‑ capture / en‑passant: 7 or 9 squares
-        These offsets never occur for Knights, Bishops, etc.
-        """
         delta = abs(self.to_square - self.from_square)
         return delta in (7, 8, 9, 16)
 
     def is_capture(self):
         return self.capture or self.en_passant
+
+    def __eq__(self, other):
+        if not isinstance(other, Move):
+            return False
+        return (self.from_square == other.from_square and
+                self.to_square == other.to_square and
+                self.promotion == other.promotion and
+                self.castle == other.castle and
+                self.en_passant == other.en_passant)
+
+    def __repr__(self):
+        return str(self)
 
     def __str__(self):
         files = 'abcdefgh'
@@ -37,5 +43,3 @@ class Move:
         if self.promotion:
             move_str += f"={self.promotion.upper()}"
         return move_str
-
-
