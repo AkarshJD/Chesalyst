@@ -112,12 +112,37 @@ class Searcher:
         # Allocate time for this move without mutating base_time
         self._move_time = (self.base_time + self.increment * (move_number - 1)) / 40
 
+        prev_score = 0  # score from the last completed depth
         best = None
         for depth in range(1, self.depth_limit + 1):
             try:
-                move = self._search_at_depth(board, depth)
-                if move is not None:
-                    best = move
+                if depth <= 2:
+                    # Scores too unstable at shallow depths — use full window
+                    move, score = self._search_at_depth(board, depth)
+                    if move is not None:
+                        best = move
+                        prev_score = score
+                else:
+                    # Aspiration window: start narrow, widen exponentially on failure
+                    delta = 25
+                    alpha = prev_score - delta
+                    beta  = prev_score + delta
+                    while True:
+                        move, score = self._search_at_depth(board, depth, alpha, beta)
+                        if move is None:
+                            break
+                        if score <= alpha:
+                            # Fail-low: true score is below our window — widen downward
+                            alpha = max(score - delta, -math.inf)
+                            delta *= 2
+                        elif score >= beta:
+                            # Fail-high: true score is above our window — widen upward
+                            beta = min(score + delta, math.inf)
+                            delta *= 2
+                        else:
+                            best = move
+                            prev_score = score
+                            break
             except TimeoutError:
                 break
 
@@ -148,7 +173,7 @@ class Searcher:
     #  Iterative deepening root                                            #
     # ------------------------------------------------------------------ #
 
-    def _search_at_depth(self, board, max_depth):
+    def _search_at_depth(self, board, max_depth, alpha=-math.inf, beta=math.inf):
         moves = board.generate_legal_moves()
         move_scores = []
 
@@ -156,7 +181,7 @@ class Searcher:
             board.make_move(move)
             try:
                 score = self._minimax(board, max_depth - 1,
-                                      -math.inf, math.inf,
+                                      alpha, beta,
                                       board.white_to_move, ply=1)
             except TimeoutError:
                 board.undo_move(move)
@@ -169,7 +194,7 @@ class Searcher:
         self.root_scores = move_scores.copy()
 
         if not move_scores:
-            return None
+            return None, 0
 
         move_scores.sort(key=lambda x: x[0], reverse=board.white_to_move)
         best_score = move_scores[0][0]
@@ -177,7 +202,7 @@ class Searcher:
         threshold = best_score - 25 if board.white_to_move else best_score + 25
         candidates = [m for s, m in move_scores
                       if (s >= threshold if board.white_to_move else s <= threshold)]
-        return random.choice(candidates)
+        return random.choice(candidates), best_score
 
     # ------------------------------------------------------------------ #
     #  Alpha-beta minimax                                                  #
