@@ -1,18 +1,18 @@
-# Chesalyst 
+# Chesalyst
 
-**Chesalyst** is a classical chess engine written in Python.  
-It combines bitboard-based move generation, alpha-beta pruning, and heuristic evaluation to simulate thoughtful, human-like play.
+**Chesalyst** is a classical chess engine written in Python.
+It combines bitboard-based move generation, alpha-beta pruning, and heuristic evaluation to play legal, thoughtful chess.
 
 ---
 
 ## Features
 
-- Bitboard-based board representation for fast calculations
+- Bitboard-based board representation
 - Alpha-beta pruning with iterative deepening
-- Static evaluation using piece-square tables and pawn structure
-- Legal move generation with check and castling rules
+- Static evaluation using piece-square tables and pawn structure (doubled, isolated, passed pawns)
+- Full legal move generation: check filtering, pins, castling, en passant, promotion
 - Custom time controls (5+3, 15+10, 60+30, etc.)
-- Undo/redo, draw by repetition, and 50-move rule support
+- Draw detection: threefold repetition, 50-move rule, insufficient material, stalemate
 - Saves games as PGN (`last_game.pgn`)
 
 ---
@@ -21,70 +21,96 @@ It combines bitboard-based move generation, alpha-beta pruning, and heuristic ev
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - NumPy
 
-### Install dependencies
+### Install
+
+```bash
+pip install -e .
+```
+
+Or without installing:
 
 ```bash
 pip install numpy
+python main.py
 ```
 
-### Run the Engine
+### Run
 
 ```bash
-python game_main.py
+python main.py
 ```
 
-Then follow the on-screen instructions to choose time controls and side.
+Follow the prompts to choose a time control and side.
+
+---
+
+## Move Input
+
+Moves are entered in long algebraic notation:
+
+| Input | Meaning |
+|-------|---------|
+| `e2e4` | Move piece from e2 to e4 |
+| `g1f3` | Knight to f3 |
+| `e7e8q` | Pawn promotes to queen |
+| `O-O` | Kingside castle |
+| `O-O-O` | Queenside castle |
+| `engine` | Let the engine play your move |
+| `draw` | Offer a draw |
+| `resign` | Resign |
+| `exit` | Quit |
 
 ---
 
 ## Modes
 
-- **Player vs Engine** – Choose White or Black and play
-- **Engine vs Engine** – Watch the machine analyze itself
-- **Analysis Mode** – Test positions and get evaluations interactively
+- **Player vs Engine** — choose White or Black
+- **Analysis Mode** — type `engine` each turn to watch the engine play both sides
 
 ---
 
-## Code Structure
+## Project Structure
 
 ```
 .
-├── board.py        # Bitboard logic and move generation
-├── evaluation.py   # Scoring logic for evaluating positions
-├── move.py         # Move object representation
-├── search.py       # Search algorithms (minimax, alpha-beta)
-├── game_main.py    # CLI-based interface and gameplay loop
-└── README.md
+├── src/
+│   └── chesalyst/
+│       ├── __init__.py
+│       ├── board.py        # Bitboard representation and legal move generation
+│       ├── evaluation.py   # Material, piece-square tables, pawn structure
+│       ├── move.py         # Move object
+│       └── search.py       # Iterative deepening alpha-beta
+├── tests/
+│   ├── test_board.py
+│   ├── test_evaluation.py
+│   ├── test_move.py
+│   └── test_search.py
+├── main.py                 # CLI entry point
+├── pyproject.toml
+└── requirements.txt
 ```
 
 ---
 
-## Known Issues
+## Running Tests
 
-- Backtracking (undo) fails during play vs computer mode
-- Engine may get stuck in a loop after a few capture moves
-- Evaluation in analysis mode is shallow
+```bash
+python -m pytest tests/ -v
+```
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. Feel free to explore, modify, and build upon it.
+MIT License. Feel free to explore, modify, and build upon it.
 
 ---
 
-
 ## Acknowledgements
 
-- Some ideas in the bitboard logic were referenced from the open-source engine **Stockfish** (GPLv3). This project re-implements those concepts in Python for educational purposes.
-- Concepts and structural inspiration were drawn from the YouTube video  
-  **"The Fascinating Programming of a Chess Engine"** by *Bartek Spitza*.  
-  [Watch it here](https://www.youtube.com/watch?v=U4ogK0MIzqk)
-- Additional insight and visual understanding were influenced by  
-  **"Coding Adventure: Chess"** by *Sebastian Lague*.  
-  [Watch it here](https://www.youtube.com/watch?v=U4ogK0MIzqk)  
-- Designed for simplicity, clarity, and a desire to learn from scratch.
-
+- Bitboard concepts referenced from **Stockfish** (GPLv3), re-implemented in Python for educational purposes.
+- Structural inspiration from **"The Fascinating Programming of a Chess Engine"** by Bartek Spitza.
+- Visual intuition from **"Coding Adventure: Chess"** by Sebastian Lague.
