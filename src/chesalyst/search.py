@@ -12,6 +12,30 @@ TT_EXACT = 0
 TT_LOWER = 1  # fail-high: stored score is a lower bound on the true value
 TT_UPPER = 2  # fail-low:  stored score is an upper bound on the true value
 
+# Piece values used only for MVV-LVA capture ordering (not evaluation).
+_MVV_VAL = {'P':1,'N':3,'B':3,'R':5,'Q':9,'K':0,'p':1,'n':3,'b':3,'r':5,'q':9,'k':0}
+
+
+def _mvv_lva(move, bb):
+    """Score a capture for ordering: higher = search first (best winning trade first)."""
+    if move.promotion:
+        return 90            # promotions before all captures
+    if move.en_passant:
+        return 9             # pawn x pawn
+    victim = 0
+    cap_mask = 1 << move.to_square
+    for p in ('Q', 'q', 'R', 'r', 'B', 'b', 'N', 'n', 'P', 'p'):
+        if int(bb[p]) & cap_mask:
+            victim = _MVV_VAL[p]
+            break
+    attacker = 1
+    from_mask = 1 << move.from_square
+    for p in ('P', 'p', 'N', 'n', 'B', 'b', 'R', 'r', 'Q', 'q', 'K', 'k'):
+        if int(bb[p]) & from_mask:
+            attacker = _MVV_VAL[p] or 1
+            break
+    return 10 * victim - attacker
+
 
 class TranspositionTable:
     def __init__(self, size=1 << 20):
@@ -32,11 +56,18 @@ class TranspositionTable:
             return score
         return None
 
-    def store(self, key, depth, score, flag):
+    def probe_move(self, key):
+        """Return the best move recorded for this position, or None."""
+        entry = self._table[key & self._mask]
+        if entry is not None and entry[0] == key:
+            return entry[4]
+        return None
+
+    def store(self, key, depth, score, flag, best_move=None):
         idx = key & self._mask
         entry = self._table[idx]
         if entry is None or depth >= entry[1]:
-            self._table[idx] = (key, depth, score, flag)
+            self._table[idx] = (key, depth, score, flag, best_move)
 
     def clear(self):
         self._table = [None] * (self._mask + 1)
@@ -51,6 +82,7 @@ class Searcher:
         self.show_thinking = show_thinking
         self.depth_limit = depth_limit
         self.tt = TranspositionTable(tt_size)
+        self._killers = [[None, None] for _ in range(64)]
 
         self.nodes = 0
         self.best_move = None
@@ -70,6 +102,7 @@ class Searcher:
         self.nodes = 0
         self.best_move = None
         self.root_scores = []
+        self._killers = [[None, None] for _ in range(64)]
 
         # Reset repetition guard when the side to move changes
         if self._last_side is not None and self._last_side != board.white_to_move:
@@ -124,7 +157,7 @@ class Searcher:
             try:
                 score = self._minimax(board, max_depth - 1,
                                       -math.inf, math.inf,
-                                      board.white_to_move)
+                                      board.white_to_move, ply=1)
             except TimeoutError:
                 board.undo_move(move)
                 raise
@@ -150,7 +183,7 @@ class Searcher:
     #  Alpha-beta minimax                                                  #
     # ------------------------------------------------------------------ #
 
-    def _minimax(self, board, depth, alpha, beta, maximizing):
+    def _minimax(self, board, depth, alpha, beta, maximizing, ply=0):
         self.nodes += 1
         if self._out_of_time():
             raise TimeoutError
@@ -162,6 +195,8 @@ class Searcher:
         if tt_score is not None:
             return tt_score
 
+        tt_move = self.tt.probe_move(board.zobrist_hash)
+
         moves = board.generate_legal_moves()
 
         if not moves:
@@ -169,43 +204,78 @@ class Searcher:
                 return (-50000 + depth) if board.white_to_move else (50000 - depth)
             return 0
 
+        moves = self._order_moves(board, moves, ply, tt_move)
         original_alpha = alpha
         original_beta = beta
+        best_move = None
 
         if maximizing:
             best = -math.inf
             for move in moves:
                 board.make_move(move)
                 try:
-                    score = self._minimax(board, depth - 1, alpha, beta, False)
+                    score = self._minimax(board, depth - 1, alpha, beta, False, ply + 1)
                 finally:
                     board.undo_move(move)
                 if score > best:
                     best = score
+                    best_move = move
                 if score > alpha:
                     alpha = score
                 if beta <= alpha:
+                    if not (move.capture or move.en_passant or move.promotion):
+                        self._update_killers(move, ply)
                     break
             flag = TT_LOWER if best >= beta else (TT_EXACT if best > original_alpha else TT_UPPER)
-            self.tt.store(board.zobrist_hash, depth, best, flag)
+            self.tt.store(board.zobrist_hash, depth, best, flag, best_move)
             return best
         else:
             best = math.inf
             for move in moves:
                 board.make_move(move)
                 try:
-                    score = self._minimax(board, depth - 1, alpha, beta, True)
+                    score = self._minimax(board, depth - 1, alpha, beta, True, ply + 1)
                 finally:
                     board.undo_move(move)
                 if score < best:
                     best = score
+                    best_move = move
                 if score < beta:
                     beta = score
                 if beta <= alpha:
+                    if not (move.capture or move.en_passant or move.promotion):
+                        self._update_killers(move, ply)
                     break
             flag = TT_UPPER if best <= alpha else (TT_EXACT if best < original_beta else TT_LOWER)
-            self.tt.store(board.zobrist_hash, depth, best, flag)
+            self.tt.store(board.zobrist_hash, depth, best, flag, best_move)
             return best
+
+    def _order_moves(self, board, moves, ply, tt_move):
+        """TT move → captures/promotions (MVV-LVA) → killers → quiet."""
+        tt_list, captures, killers, quiet = [], [], [], []
+        k = self._killers[ply] if ply < 64 else (None, None)
+        k1, k2 = k[0], k[1]
+
+        for move in moves:
+            if tt_move is not None and move == tt_move:
+                tt_list.append(move)
+            elif move.capture or move.en_passant or move.promotion:
+                captures.append(move)
+            elif move == k1 or move == k2:
+                killers.append(move)
+            else:
+                quiet.append(move)
+
+        captures.sort(key=lambda m: _mvv_lva(m, board.bitboards), reverse=True)
+        return tt_list + captures + killers + quiet
+
+    def _update_killers(self, move, ply):
+        if ply >= 64:
+            return
+        k = self._killers[ply]
+        if k[0] != move:
+            k[1] = k[0]
+            k[0] = move
 
     def _quiescence(self, board, alpha, beta, maximizing):
         self.nodes += 1
