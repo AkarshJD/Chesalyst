@@ -229,10 +229,17 @@ class Searcher:
 
         if maximizing:
             best = -math.inf
-            for move in moves:
+            for i, move in enumerate(moves):
+                is_quiet = not (move.capture or move.en_passant or move.promotion)
                 board.make_move(move)
                 try:
-                    score = self._minimax(board, depth - 1, alpha, beta, False, ply + 1)
+                    if i >= 3 and depth >= 3 and is_quiet:
+                        R = max(1, int(math.log(depth) * math.log(i + 1) / 2.5))
+                        score = self._minimax(board, depth - 1 - R, alpha, beta, False, ply + 1)
+                        if score > alpha:
+                            score = self._minimax(board, depth - 1, alpha, beta, False, ply + 1)
+                    else:
+                        score = self._minimax(board, depth - 1, alpha, beta, False, ply + 1)
                 finally:
                     board.undo_move(move)
                 if score > best:
@@ -241,7 +248,7 @@ class Searcher:
                 if score > alpha:
                     alpha = score
                 if beta <= alpha:
-                    if not (move.capture or move.en_passant or move.promotion):
+                    if is_quiet:
                         self._update_killers(move, ply)
                     break
             flag = TT_LOWER if best >= beta else (TT_EXACT if best > original_alpha else TT_UPPER)
@@ -249,10 +256,17 @@ class Searcher:
             return best
         else:
             best = math.inf
-            for move in moves:
+            for i, move in enumerate(moves):
+                is_quiet = not (move.capture or move.en_passant or move.promotion)
                 board.make_move(move)
                 try:
-                    score = self._minimax(board, depth - 1, alpha, beta, True, ply + 1)
+                    if i >= 3 and depth >= 3 and is_quiet:
+                        R = max(1, int(math.log(depth) * math.log(i + 1) / 2.5))
+                        score = self._minimax(board, depth - 1 - R, alpha, beta, True, ply + 1)
+                        if score < beta:
+                            score = self._minimax(board, depth - 1, alpha, beta, True, ply + 1)
+                    else:
+                        score = self._minimax(board, depth - 1, alpha, beta, True, ply + 1)
                 finally:
                     board.undo_move(move)
                 if score < best:
@@ -261,7 +275,7 @@ class Searcher:
                 if score < beta:
                     beta = score
                 if beta <= alpha:
-                    if not (move.capture or move.en_passant or move.promotion):
+                    if is_quiet:
                         self._update_killers(move, ply)
                     break
             flag = TT_UPPER if best <= alpha else (TT_EXACT if best < original_beta else TT_LOWER)
