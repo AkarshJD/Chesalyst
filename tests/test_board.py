@@ -301,6 +301,44 @@ def test_en_passant():
 
 
 # ------------------------------------------------------------------ #
+#  Zobrist hashing                                                     #
+# ------------------------------------------------------------------ #
+
+def test_zobrist_hash_restored_after_undo():
+    board = Board()
+    before_hash = board.zobrist_hash
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert board.zobrist_hash != before_hash, "Hash must change after a move"
+    board.undo_move(move)
+    assert board.zobrist_hash == before_hash, "Hash must be restored after undo"
+
+
+def test_zobrist_different_positions_different_hashes():
+    board = Board()
+    start_hash = board.zobrist_hash
+    moves = board.generate_legal_moves()
+    hashes = set()
+    for m in moves:
+        board.make_move(m)
+        hashes.add(board.zobrist_hash)
+        board.undo_move(m)
+    assert start_hash not in hashes, "Starting position hash must differ from all one-ply successors"
+    assert len(hashes) == len(moves), "All distinct moves must produce distinct hashes"
+
+
+def test_zobrist_hash_matches_recompute():
+    board = Board()
+    for _ in range(5):
+        moves = board.generate_legal_moves()
+        if not moves:
+            break
+        board.make_move(moves[0])
+    assert board.zobrist_hash == board._compute_zobrist(), \
+        "Incremental hash must match full recompute after several moves"
+
+
+# ------------------------------------------------------------------ #
 #  Helpers                                                             #
 # ------------------------------------------------------------------ #
 

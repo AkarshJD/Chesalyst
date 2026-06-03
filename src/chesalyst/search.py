@@ -4,15 +4,53 @@ import time
 
 from chesalyst.evaluation import Evaluator
 
+# ---------------------------------------------------------------------- #
+#  Transposition table                                                     #
+# ---------------------------------------------------------------------- #
+
+TT_EXACT = 0
+TT_LOWER = 1  # fail-high: stored score is a lower bound on the true value
+TT_UPPER = 2  # fail-low:  stored score is an upper bound on the true value
+
+
+class TranspositionTable:
+    def __init__(self, size=1 << 20):
+        self._mask = size - 1
+        self._table = [None] * size
+
+    def probe(self, key, depth, alpha, beta):
+        """Return a usable score if there's a hit, else None."""
+        entry = self._table[key & self._mask]
+        if entry is None or entry[0] != key or entry[1] < depth:
+            return None
+        score, flag = entry[2], entry[3]
+        if flag == TT_EXACT:
+            return score
+        if flag == TT_LOWER and score >= beta:
+            return score
+        if flag == TT_UPPER and score <= alpha:
+            return score
+        return None
+
+    def store(self, key, depth, score, flag):
+        idx = key & self._mask
+        entry = self._table[idx]
+        if entry is None or depth >= entry[1]:
+            self._table[idx] = (key, depth, score, flag)
+
+    def clear(self):
+        self._table = [None] * (self._mask + 1)
+
 
 class Searcher:
     def __init__(self, evaluator=None, base_time=300, increment=0,
-                 show_thinking=False, depth_limit=4):
+                 show_thinking=False, depth_limit=4, tt_size=1 << 20):
         self.evaluator = evaluator or Evaluator()
         self.base_time = base_time        # total clock time (seconds)
         self.increment = increment        # per-move increment (seconds)
         self.show_thinking = show_thinking
         self.depth_limit = depth_limit
+        self.tt = TranspositionTable(tt_size)
 
         self.nodes = 0
         self.best_move = None
@@ -120,12 +158,19 @@ class Searcher:
         if depth == 0:
             return self._quiescence(board, alpha, beta, maximizing)
 
+        tt_score = self.tt.probe(board.zobrist_hash, depth, alpha, beta)
+        if tt_score is not None:
+            return tt_score
+
         moves = board.generate_legal_moves()
 
         if not moves:
             if board.is_check():
                 return (-50000 + depth) if board.white_to_move else (50000 - depth)
             return 0
+
+        original_alpha = alpha
+        original_beta = beta
 
         if maximizing:
             best = -math.inf
@@ -135,10 +180,14 @@ class Searcher:
                     score = self._minimax(board, depth - 1, alpha, beta, False)
                 finally:
                     board.undo_move(move)
-                best = max(best, score)
-                alpha = max(alpha, score)
+                if score > best:
+                    best = score
+                if score > alpha:
+                    alpha = score
                 if beta <= alpha:
                     break
+            flag = TT_LOWER if best >= beta else (TT_EXACT if best > original_alpha else TT_UPPER)
+            self.tt.store(board.zobrist_hash, depth, best, flag)
             return best
         else:
             best = math.inf
@@ -148,10 +197,14 @@ class Searcher:
                     score = self._minimax(board, depth - 1, alpha, beta, True)
                 finally:
                     board.undo_move(move)
-                best = min(best, score)
-                beta = min(beta, score)
+                if score < best:
+                    best = score
+                if score < beta:
+                    beta = score
                 if beta <= alpha:
                     break
+            flag = TT_UPPER if best <= alpha else (TT_EXACT if best < original_beta else TT_LOWER)
+            self.tt.store(board.zobrist_hash, depth, best, flag)
             return best
 
     def _quiescence(self, board, alpha, beta, maximizing):

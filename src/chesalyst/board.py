@@ -1,7 +1,17 @@
+import random as _random
 import numpy as np
 from chesalyst.move import Move
 
 _PIECE_ORDER = ('P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k')
+_PIECE_IDX   = {'P':0,'N':1,'B':2,'R':3,'Q':4,'K':5,'p':6,'n':7,'b':8,'r':9,'q':10,'k':11}
+
+# Zobrist random numbers — deterministic seed so hash values are reproducible.
+_rng      = _random.Random(0xcafebabe)
+_Z_PIECE  = [[_rng.getrandbits(64) for _ in range(64)] for _ in range(12)]
+_Z_SIDE   = _rng.getrandbits(64)          # XOR each time side-to-move flips
+_Z_CASTLE = [_rng.getrandbits(64) for _ in range(4)]  # order: K, Q, k, q
+_Z_EP     = [_rng.getrandbits(64) for _ in range(8)]  # one per file
+del _rng
 
 # Expected file delta per sliding direction — used for wrap detection.
 # Indexed as a list with offset 9 so direction+9 gives the delta.
@@ -69,6 +79,7 @@ class Board:
         self.white_occ = np.uint64(0)
         self.black_occ = np.uint64(0)
         self.all_occ = np.uint64(0)
+        self.zobrist_hash = 0
         self.set_starting_position()
 
     def set_starting_position(self):
@@ -93,6 +104,25 @@ class Board:
         self.halfmove_clock = 0
         self.fullmove_number = 1
         self._rebuild_occ()
+        self.zobrist_hash = self._compute_zobrist()
+
+    def _compute_zobrist(self):
+        """Full recompute from scratch — used once at startup (or in tests)."""
+        h = 0
+        zp = _Z_PIECE
+        pi = _PIECE_IDX
+        for piece, idx in pi.items():
+            for sq in _lsb_iter(self.bitboards[piece]):
+                h ^= zp[idx][sq]
+        if not self.white_to_move:
+            h ^= _Z_SIDE
+        cr = self.castling_rights
+        for i, key in enumerate(('K', 'Q', 'k', 'q')):
+            if cr[key]:
+                h ^= _Z_CASTLE[i]
+        if self.en_passant_square is not None:
+            h ^= _Z_EP[self.en_passant_square & 7]
+        return h
 
     def _rebuild_occ(self):
         bb = self.bitboards
@@ -286,11 +316,10 @@ class Board:
     # ------------------------------------------------------------------ #
 
     def make_move(self, move):
-        # Snapshot stores numpy uint64 references directly — they are immutable,
-        # so in-place modifications to self.bitboards create new objects and
-        # leave the snapshotted values untouched.
         cr = self.castling_rights
         bb = self.bitboards
+        h = self.zobrist_hash
+
         self._state_stack.append((
             (bb['P'], bb['N'], bb['B'], bb['R'], bb['Q'], bb['K'],
              bb['p'], bb['n'], bb['b'], bb['r'], bb['q'], bb['k']),
@@ -300,7 +329,15 @@ class Board:
             self.en_passant_square,
             self.halfmove_clock,
             self.fullmove_number,
+            h,
         ))
+
+        # XOR out old EP and castling from hash before any board changes
+        if self.en_passant_square is not None:
+            h ^= _Z_EP[self.en_passant_square & 7]
+        for i, key in enumerate(('K', 'Q', 'k', 'q')):
+            if cr[key]:
+                h ^= _Z_CASTLE[i]
 
         from_mask = 1 << move.from_square
         moving_piece = None
@@ -312,7 +349,8 @@ class Board:
         if moving_piece is None:
             raise ValueError(f"No piece on square {move.from_square}")
 
-        from_clr = ~from_mask  # Python int bitwise NOT; AND with uint64 is safe
+        h ^= _Z_PIECE[_PIECE_IDX[moving_piece]][move.from_square]
+        from_clr = ~from_mask
         bb[moving_piece] = int(bb[moving_piece]) & from_clr
 
         if move.capture or move.en_passant:
@@ -324,44 +362,57 @@ class Board:
             for piece in enemy_pieces:
                 val = int(bb[piece])
                 if val & (1 << cap_sq):
+                    h ^= _Z_PIECE[_PIECE_IDX[piece]][cap_sq]
                     bb[piece] = val & cap_clr
                     break
 
         dest_piece = move.promotion if move.promotion else moving_piece
         bb[dest_piece] = int(bb[dest_piece]) | (1 << move.to_square)
+        h ^= _Z_PIECE[_PIECE_IDX[dest_piece]][move.to_square]
 
         if move.castle == 'kingside':
             if self.white_to_move:
                 bb['R'] = (int(bb['R']) & ~(1 << 63)) | (1 << 61)
+                h ^= _Z_PIECE[_PIECE_IDX['R']][63] ^ _Z_PIECE[_PIECE_IDX['R']][61]
             else:
                 bb['r'] = (int(bb['r']) & ~(1 << 7)) | (1 << 5)
+                h ^= _Z_PIECE[_PIECE_IDX['r']][7] ^ _Z_PIECE[_PIECE_IDX['r']][5]
         elif move.castle == 'queenside':
             if self.white_to_move:
                 bb['R'] = (int(bb['R']) & ~(1 << 56)) | (1 << 59)
+                h ^= _Z_PIECE[_PIECE_IDX['R']][56] ^ _Z_PIECE[_PIECE_IDX['R']][59]
             else:
                 bb['r'] = (int(bb['r']) & ~(1 << 0)) | (1 << 3)
+                h ^= _Z_PIECE[_PIECE_IDX['r']][0] ^ _Z_PIECE[_PIECE_IDX['r']][3]
 
         if moving_piece.upper() == 'P' and abs(move.from_square - move.to_square) == 16:
             self.en_passant_square = (move.from_square + move.to_square) // 2
         else:
             self.en_passant_square = None
 
+        if self.en_passant_square is not None:
+            h ^= _Z_EP[self.en_passant_square & 7]
+
         if moving_piece == 'K':
-            self.castling_rights['K'] = False
-            self.castling_rights['Q'] = False
+            cr['K'] = False
+            cr['Q'] = False
         elif moving_piece == 'k':
-            self.castling_rights['k'] = False
-            self.castling_rights['q'] = False
+            cr['k'] = False
+            cr['q'] = False
         elif moving_piece == 'R':
             if move.from_square == 63:
-                self.castling_rights['K'] = False
+                cr['K'] = False
             elif move.from_square == 56:
-                self.castling_rights['Q'] = False
+                cr['Q'] = False
         elif moving_piece == 'r':
             if move.from_square == 7:
-                self.castling_rights['k'] = False
+                cr['k'] = False
             elif move.from_square == 0:
-                self.castling_rights['q'] = False
+                cr['q'] = False
+
+        for i, key in enumerate(('K', 'Q', 'k', 'q')):
+            if cr[key]:
+                h ^= _Z_CASTLE[i]
 
         if moving_piece.upper() == 'P' or move.capture or move.en_passant:
             self.halfmove_clock = 0
@@ -372,12 +423,15 @@ class Board:
             self.fullmove_number += 1
 
         self.white_to_move = not self.white_to_move
+        h ^= _Z_SIDE
+
+        self.zobrist_hash = h
         self._rebuild_occ()
 
     def undo_move(self, move):
         if not self._state_stack:
             raise ValueError("No state to undo.")
-        bb_vals, wo, bo, ao, wtm, cr_tuple, ep, hmc, fmn = self._state_stack.pop()
+        bb_vals, wo, bo, ao, wtm, cr_tuple, ep, hmc, fmn, zh = self._state_stack.pop()
         bb = self.bitboards
         (bb['P'], bb['N'], bb['B'], bb['R'], bb['Q'], bb['K'],
          bb['p'], bb['n'], bb['b'], bb['r'], bb['q'], bb['k']) = bb_vals
@@ -392,6 +446,7 @@ class Board:
         self.en_passant_square = ep
         self.halfmove_clock = hmc
         self.fullmove_number = fmn
+        self.zobrist_hash = zh
 
     # ------------------------------------------------------------------ #
     #  Check / attack detection                                            #
