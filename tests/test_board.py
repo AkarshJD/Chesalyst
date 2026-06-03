@@ -327,6 +327,35 @@ def test_zobrist_different_positions_different_hashes():
     assert len(hashes) == len(moves), "All distinct moves must produce distinct hashes"
 
 
+def test_null_move_preserves_state():
+    board = Board()
+    before_hash = board.zobrist_hash
+    before_wtm = board.white_to_move
+    before_ep = board.en_passant_square
+
+    board.make_null_move()
+    assert board.white_to_move != before_wtm, "Null move must flip side to move"
+    assert board.zobrist_hash != before_hash, "Null move must change hash"
+
+    board.undo_null_move()
+    assert board.white_to_move == before_wtm
+    assert board.en_passant_square == before_ep
+    assert board.zobrist_hash == before_hash, "Hash must be restored after undo_null_move"
+
+
+def test_null_move_clears_en_passant():
+    board = Board()
+    e2e4 = next(m for m in board.generate_legal_moves()
+                if m.from_square == sq('e2') and m.to_square == sq('e4'))
+    board.make_move(e2e4)
+    assert board.en_passant_square is not None
+
+    board.make_null_move()
+    assert board.en_passant_square is None, "Null move must clear en passant square"
+    board.undo_null_move()
+    assert board.en_passant_square is not None, "EP must be restored after undo_null_move"
+
+
 def test_zobrist_hash_matches_recompute():
     board = Board()
     for _ in range(5):

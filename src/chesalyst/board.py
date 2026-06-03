@@ -76,6 +76,7 @@ class Board:
         self.halfmove_clock = 0
         self.fullmove_number = 1
         self._state_stack = []
+        self._null_stack = []
         self.white_occ = np.uint64(0)
         self.black_occ = np.uint64(0)
         self.all_occ = np.uint64(0)
@@ -447,6 +448,25 @@ class Board:
         self.halfmove_clock = hmc
         self.fullmove_number = fmn
         self.zobrist_hash = zh
+
+    def make_null_move(self):
+        """Pass the turn without moving a piece (for null move pruning)."""
+        h = self.zobrist_hash
+        if self.en_passant_square is not None:
+            h ^= _Z_EP[self.en_passant_square & 7]
+        self._null_stack.append((self.en_passant_square, self.halfmove_clock, self.zobrist_hash))
+        self.en_passant_square = None
+        self.halfmove_clock += 1
+        self.white_to_move = not self.white_to_move
+        h ^= _Z_SIDE
+        self.zobrist_hash = h
+
+    def undo_null_move(self):
+        ep, hmc, zh = self._null_stack.pop()
+        self.en_passant_square = ep
+        self.halfmove_clock = hmc
+        self.zobrist_hash = zh
+        self.white_to_move = not self.white_to_move
 
     # ------------------------------------------------------------------ #
     #  Check / attack detection                                            #

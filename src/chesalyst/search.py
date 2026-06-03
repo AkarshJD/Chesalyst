@@ -183,7 +183,7 @@ class Searcher:
     #  Alpha-beta minimax                                                  #
     # ------------------------------------------------------------------ #
 
-    def _minimax(self, board, depth, alpha, beta, maximizing, ply=0):
+    def _minimax(self, board, depth, alpha, beta, maximizing, ply=0, null_move_ok=True):
         self.nodes += 1
         if self._out_of_time():
             raise TimeoutError
@@ -196,6 +196,24 @@ class Searcher:
             return tt_score
 
         tt_move = self.tt.probe_move(board.zobrist_hash)
+
+        # Null move pruning — skip our turn; if even that gives score >= beta, prune.
+        # Guards: not in check, has non-pawn material (avoids zugzwang), no consecutive nulls.
+        if (null_move_ok
+                and depth >= 3
+                and not board.is_check()
+                and self._has_non_pawn_material(board)):
+            R = 3 if depth >= 6 else 2
+            board.make_null_move()
+            try:
+                null_score = self._minimax(board, depth - 1 - R, alpha, beta,
+                                           not maximizing, ply + 1, null_move_ok=False)
+            finally:
+                board.undo_null_move()
+            if maximizing and null_score >= beta:
+                return null_score
+            if not maximizing and null_score <= alpha:
+                return null_score
 
         moves = board.generate_legal_moves()
 
@@ -334,6 +352,14 @@ class Searcher:
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
     # ------------------------------------------------------------------ #
+
+    def _has_non_pawn_material(self, board):
+        """True if the side to move has at least one piece beyond king and pawns."""
+        bb = board.bitboards
+        if board.white_to_move:
+            return bool(int(bb['N']) | int(bb['B']) | int(bb['R']) | int(bb['Q']))
+        else:
+            return bool(int(bb['n']) | int(bb['b']) | int(bb['r']) | int(bb['q']))
 
     def _out_of_time(self):
         return time.time() - self._start_time > self._move_time
