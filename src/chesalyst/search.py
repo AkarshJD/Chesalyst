@@ -258,10 +258,24 @@ class Searcher:
         original_beta = beta
         best_move = None
 
+        # Futility pruning: at depth 1, skip quiet moves whose static eval
+        # is too far below alpha (maximizing) or above beta (minimizing).
+        # Captures, promotions, and en passants are never skipped.
+        futile = False
+        _futility_eval = None
+        if depth == 1 and not board.is_check():
+            _futility_eval = self.evaluator.evaluate(board)
+            if maximizing and _futility_eval + 150 <= alpha:
+                futile = True
+            elif not maximizing and _futility_eval - 150 >= beta:
+                futile = True
+
         if maximizing:
-            best = -math.inf
+            best = _futility_eval if futile else -math.inf
             for i, move in enumerate(moves):
                 is_quiet = not (move.capture or move.en_passant or move.promotion)
+                if futile and is_quiet:
+                    continue
                 board.make_move(move)
                 try:
                     if i >= 3 and depth >= 3 and is_quiet:
@@ -286,9 +300,11 @@ class Searcher:
             self.tt.store(board.zobrist_hash, depth, best, flag, best_move)
             return best
         else:
-            best = math.inf
+            best = _futility_eval if futile else math.inf
             for i, move in enumerate(moves):
                 is_quiet = not (move.capture or move.en_passant or move.promotion)
+                if futile and is_quiet:
+                    continue
                 board.make_move(move)
                 try:
                     if i >= 3 and depth >= 3 and is_quiet:
