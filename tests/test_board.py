@@ -9,10 +9,13 @@ from chesalyst.move import Move
 # ------------------------------------------------------------------ #
 
 def empty_board():
-    """Board with all pieces cleared."""
+    """Board with all pieces and occupancy cleared."""
     b = Board()
-    b.bitboards = {k: np.uint64(0) for k in b.bitboards}
+    b.bitboards = {k: 0 for k in b.bitboards}
     b.castling_rights = {'K': False, 'Q': False, 'k': False, 'q': False}
+    b.white_occ = 0
+    b.black_occ = 0
+    b.all_occ = 0
     return b
 
 
@@ -85,6 +88,7 @@ def test_white_pawn_attacks_correct_squares():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.bitboards['P'] = np.uint64(1 << sq('e4'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     assert b.is_square_attacked(sq('d5'), by_white=True)
     assert b.is_square_attacked(sq('f5'), by_white=True)
@@ -100,6 +104,7 @@ def test_black_pawn_attacks_correct_squares():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.bitboards['p'] = np.uint64(1 << sq('e5'))
     b.white_to_move = False
+    b._rebuild_occ()
 
     assert b.is_square_attacked(sq('d4'), by_white=False)
     assert b.is_square_attacked(sq('f4'), by_white=False)
@@ -114,6 +119,7 @@ def test_pawn_attack_no_file_wrap():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.bitboards['P'] = np.uint64(1 << sq('a4'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     assert b.is_square_attacked(sq('b5'), by_white=True)
     assert not b.is_square_attacked(sq('h5'), by_white=True)
@@ -131,6 +137,7 @@ def test_king_cannot_walk_into_pawn_attack():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.bitboards['p'] = np.uint64(1 << sq('e3'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     legal = board_legal_destinations(b, sq('e1'))
     assert sq('d2') not in legal, "King must not walk into pawn attack on d2"
@@ -145,6 +152,7 @@ def test_pinned_piece_cannot_move_off_pin_ray():
     b.bitboards['k'] = np.uint64(1 << sq('d8'))   # black king off the pin file
     b.bitboards['r'] = np.uint64(1 << sq('e8'))   # black rook pins white rook
     b.white_to_move = True
+    b._rebuild_occ()
 
     legal = board_legal_destinations(b, sq('e4'))
     for dest in legal:
@@ -158,6 +166,7 @@ def test_king_in_check_must_resolve():
     b.bitboards['k'] = np.uint64(1 << sq('d8'))
     b.bitboards['r'] = np.uint64(1 << sq('e8'))   # gives check on e-file
     b.white_to_move = True
+    b._rebuild_occ()
 
     assert b.is_check()
     legal = b.generate_legal_moves()
@@ -175,6 +184,7 @@ def test_checkmate_detected():
     b.bitboards['k'] = np.uint64(1 << sq('a3'))
     b.bitboards['r'] = np.uint64((1 << sq('a1')) | (1 << sq('b2')))
     b.white_to_move = True
+    b._rebuild_occ()
 
     # Verify it's actually checkmate
     if b.is_check() and len(b.generate_legal_moves()) == 0:
@@ -188,6 +198,7 @@ def test_stalemate_detected():
     b.bitboards['k'] = np.uint64(1 << sq('c1'))
     b.bitboards['q'] = np.uint64(1 << sq('c3'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     if not b.is_check() and len(b.generate_legal_moves()) == 0:
         assert b.is_stalemate()
@@ -204,6 +215,7 @@ def test_white_kingside_castle():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.castling_rights = {'K': True, 'Q': False, 'k': False, 'q': False}
     b.white_to_move = True
+    b._rebuild_occ()
 
     legal = b.generate_legal_moves()
     castle_moves = [m for m in legal if m.is_kingside_castle()]
@@ -223,6 +235,7 @@ def test_black_rook_move_revokes_castling_right():
     b.bitboards['r'] = np.uint64(1 << sq('h8'))
     b.castling_rights = {'K': False, 'Q': False, 'k': True, 'q': False}
     b.white_to_move = False
+    b._rebuild_occ()
 
     move = Move(sq('h8'), sq('g8'))
     b.make_move(move)
@@ -236,6 +249,7 @@ def test_white_rook_move_revokes_castling_right():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.castling_rights = {'K': True, 'Q': False, 'k': False, 'q': False}
     b.white_to_move = True
+    b._rebuild_occ()
 
     move = Move(sq('h1'), sq('g1'))
     b.make_move(move)
@@ -254,6 +268,7 @@ def test_pawn_cannot_capture_across_file_wrap():
     b.bitboards['P'] = np.uint64(1 << sq('a2'))
     b.bitboards['r'] = np.uint64(1 << sq('h3'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     legal = b.generate_legal_moves()
     pawn_captures = [m for m in legal if m.from_square == sq('a2') and m.capture]
@@ -267,6 +282,7 @@ def test_pawn_double_push():
     b.bitboards['k'] = np.uint64(1 << sq('e8'))
     b.bitboards['P'] = np.uint64(1 << sq('e2'))
     b.white_to_move = True
+    b._rebuild_occ()
 
     legal = b.generate_legal_moves()
     pawn_moves = [m for m in legal if m.from_square == sq('e2')]
@@ -282,6 +298,120 @@ def test_en_passant():
                 if m.from_square == sq('e2') and m.to_square == sq('e4'))
     board.make_move(e2e4)
     assert board.en_passant_square == sq('e3')
+
+
+# ------------------------------------------------------------------ #
+#  Hash history / repetition tracking                                 #
+# ------------------------------------------------------------------ #
+
+def test_hash_history_grows_and_shrinks():
+    board = Board()
+    assert len(board._hash_history) == 0
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert len(board._hash_history) == 1
+    board.undo_move(move)
+    assert len(board._hash_history) == 0
+
+
+def test_hash_history_records_pre_move_hash():
+    board = Board()
+    start_hash = board.zobrist_hash
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert board._hash_history[0] == start_hash, \
+        "History must record the hash before the move, not after"
+
+
+def test_repetition_detected_in_history():
+    # Make a move and undo it manually so the starting hash appears in history.
+    board = Board()
+    start_hash = board.zobrist_hash
+    moves = board.generate_legal_moves()
+    # Play two moves then reach the same position again via a different path.
+    m1 = next(m for m in moves if m.from_square == sq('g1'))  # Ng1-f3
+    board.make_move(m1)
+    m2 = next(m for m in board.generate_legal_moves()
+              if m.from_square == sq('g8'))  # Ng8-f6
+    board.make_move(m2)
+    # Now move the knight back: Nf3-g1
+    m3 = next(m for m in board.generate_legal_moves()
+              if m.to_square == sq('g1'))
+    board.make_move(m3)
+    m4 = next(m for m in board.generate_legal_moves()
+              if m.to_square == sq('g8'))
+    board.make_move(m4)
+    # Board is back to starting position — hash should be in history
+    assert board.zobrist_hash == start_hash
+    assert board.zobrist_hash in board._hash_history, \
+        "Starting position must be in history after 4-move round-trip"
+
+
+# ------------------------------------------------------------------ #
+#  Zobrist hashing                                                     #
+# ------------------------------------------------------------------ #
+
+def test_zobrist_hash_restored_after_undo():
+    board = Board()
+    before_hash = board.zobrist_hash
+    move = board.generate_legal_moves()[0]
+    board.make_move(move)
+    assert board.zobrist_hash != before_hash, "Hash must change after a move"
+    board.undo_move(move)
+    assert board.zobrist_hash == before_hash, "Hash must be restored after undo"
+
+
+def test_zobrist_different_positions_different_hashes():
+    board = Board()
+    start_hash = board.zobrist_hash
+    moves = board.generate_legal_moves()
+    hashes = set()
+    for m in moves:
+        board.make_move(m)
+        hashes.add(board.zobrist_hash)
+        board.undo_move(m)
+    assert start_hash not in hashes, "Starting position hash must differ from all one-ply successors"
+    assert len(hashes) == len(moves), "All distinct moves must produce distinct hashes"
+
+
+def test_null_move_preserves_state():
+    board = Board()
+    before_hash = board.zobrist_hash
+    before_wtm = board.white_to_move
+    before_ep = board.en_passant_square
+
+    board.make_null_move()
+    assert board.white_to_move != before_wtm, "Null move must flip side to move"
+    assert board.zobrist_hash != before_hash, "Null move must change hash"
+
+    board.undo_null_move()
+    assert board.white_to_move == before_wtm
+    assert board.en_passant_square == before_ep
+    assert board.zobrist_hash == before_hash, "Hash must be restored after undo_null_move"
+
+
+def test_null_move_clears_en_passant():
+    board = Board()
+    e2e4 = next(m for m in board.generate_legal_moves()
+                if m.from_square == sq('e2') and m.to_square == sq('e4'))
+    board.make_move(e2e4)
+    assert board.en_passant_square is not None
+
+    board.make_null_move()
+    assert board.en_passant_square is None, "Null move must clear en passant square"
+    board.undo_null_move()
+    assert board.en_passant_square is not None, "EP must be restored after undo_null_move"
+
+
+def test_zobrist_hash_matches_recompute():
+    board = Board()
+    for _ in range(5):
+        moves = board.generate_legal_moves()
+        if not moves:
+            break
+        board.make_move(moves[0])
+    assert board.zobrist_hash == board._compute_zobrist(), \
+        "Incremental hash must match full recompute after several moves"
 
 
 # ------------------------------------------------------------------ #

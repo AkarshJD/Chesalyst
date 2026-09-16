@@ -14,6 +14,7 @@ def _board_snapshot(board):
         'halfmove_clock': board.halfmove_clock,
         'fullmove_number': board.fullmove_number,
         'stack_depth': len(board._state_stack),
+        'hash_history_len': len(board._hash_history),
     }
 
 
@@ -137,6 +138,7 @@ def test_finds_mate_in_one():
     board.bitboards['p'] = np.uint64((1 << sq('a7')) | (1 << sq('b7')))
     board.white_to_move = True
     board.castling_rights = {'K': False, 'Q': False, 'k': False, 'q': False}
+    board._rebuild_occ()
 
     searcher = Searcher(base_time=60, depth_limit=3)
     move = searcher.search(board, move_number=1)
